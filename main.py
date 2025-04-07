@@ -80,10 +80,18 @@ async def wait(seconds: int = 3) -> str:
 
 @mcp.tool()
 async def inspect_page() -> str:
-    """Get page content and interactive elements."""
-    page = await browser_context.get_current_page()
-    content = await page.content()
-    return content
+    """
+    Lists interactive elements and extracts content from the current page.
+    Returns:
+        str: A formatted string that lists all interactive elements (if any) along with the content.
+    """
+    # Get the current state to inspect interactive elements
+    state = await browser_context.get_state()
+    prompt_message = AgentMessagePrompt(
+        state,
+        include_attributes=["type", "role", "placeholder", "aria-label", "title"],
+    ).get_user_message(use_vision=False)
+    return prompt_message.content
 
 @mcp.tool()
 async def scroll_down(amount: int = None) -> str:
