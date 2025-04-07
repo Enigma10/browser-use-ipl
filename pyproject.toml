@@ -1,0 +1,15 @@
+[project]
+name = "mcp-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "browser-use>=0.1.40",
+    "fastapi>=0.109.0",
+    "markdownify>=0.11.6",
+    "mcp>=0.1.0",
+    "playwright>=1.50.0",
+    "python-dotenv>=1.0.0",
+    "uvicorn>=0.27.0",
+]

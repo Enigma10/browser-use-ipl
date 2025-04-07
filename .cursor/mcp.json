@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+        "mcp-server": {
+            "command": "uv",
+            "args": [
+                "--directory",
+                "/Users/vikashsaini/Desktop/mcp/mcp-server/",
+                "run",
+                "main.py"
+            ]
+        }
+    }
+}
