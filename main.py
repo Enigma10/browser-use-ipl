@@ -481,21 +481,69 @@ async def get_team_schedule(team_name: str) -> Dict[str, Any]:
     """Get schedule for a specific IPL team."""
     try:
         logger.info(f"Getting schedule for team: {team_name}")
-        if not browser_context:
-            await initialize_browser(headless=False, task="Get Team Schedule")
         
-        await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/matches")
-        await wait(2)
+        # First check if we have the full schedule in cache
+        cache = load_cache()
+        update_last_checked('schedule')
         
-        schedule_content = await inspect_page()
+        # Check if we've already checked recently
+        recently_checked = is_checked_recently(cache, 'schedule', minutes=30)
+        
+        if recently_checked and cache.get('schedule') and cache['schedule'].get('matches'):
+            logger.info("Using cached schedule to filter team matches")
+            return filter_team_matches(cache['schedule']['matches'], team_name)
+        
+        # If cache is not recent or empty, fetch fresh data
+        schedule_data = await fetch_fresh_data('schedule')
+        if schedule_data:
+            update_cache('schedule', schedule_data)
+            return filter_team_matches(schedule_data['matches'], team_name)
+        
+        # If fetch fails but we have cache, use it
+        if cache.get('schedule') and cache['schedule'].get('matches'):
+            logger.warning("Fetch failed, using cached data for team schedule")
+            return filter_team_matches(cache['schedule']['matches'], team_name)
+        
         return {
-            "status": "success",
-            "team": team_name,
-            "schedule": schedule_content
+            "status": "error",
+            "message": "Failed to fetch team schedule and no cache available"
         }
+        
     except Exception as e:
         logger.error(f"Error getting team schedule: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+def filter_team_matches(matches_data: Dict, team_name: str) -> Dict[str, Any]:
+    """Filter matches for a specific team from the schedule data."""
+    try:
+        team_matches = []
+        if not matches_data or not matches_data.get('content'):
+            return {
+                "status": "error",
+                "message": "Invalid matches data format"
+            }
+        
+        content = matches_data['content']
+        team_name_lower = team_name.lower()
+        
+        # Split content into lines and process each match
+        for line in content.split('\n'):
+            if team_name_lower in line.lower():
+                team_matches.append(line.strip())
+        
+        return {
+            "status": "success",
+            "team": team_name,
+            "matches": team_matches,
+            "match_count": len(team_matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error filtering team matches: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error processing team matches: {str(e)}"
+        }
 
 @mcp.tool()
 async def get_ipl_schedule() -> Dict[str, Any]:
