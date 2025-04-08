@@ -1,12 +1,17 @@
 {
     "mcpServers": {
-        "mcp-server": {
-            "command": "uv",
+        "mcp-server-docker": {
+            "command": "docker",
             "args": [
-                "--directory",
-                "/Users/vikashsaini/Desktop/mcp/mcp-server/",
-                "run",
-                "main.py"
+              "run",
+              "-i",
+              "--rm",
+              "-p",
+              "8000:8000",
+              "mcp-server",
+              "uv",
+              "run",
+              "main.py"
             ]
         }
     }
