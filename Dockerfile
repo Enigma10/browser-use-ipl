@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -33,13 +33,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy project files first
 COPY . .
 
-# Install dependencies
+# Install Python dependencies including browser-use
 RUN pip install --upgrade pip && \
     pip install uv && \
-    uv pip install --system -e .
-
-# Install Playwright dependencies and browsers
-RUN playwright install-deps && playwright install
+    uv pip install --system -e . && \
+    playwright install-deps && \
+    playwright install chromium
 
 # Expose the port that uvicorn will run on
 EXPOSE 8111
