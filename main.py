@@ -7,10 +7,18 @@ from typing import Dict, Any, Optional
 import os
 import json
 from datetime import datetime, timedelta
+from starlette.applications import Starlette
+from starlette.routing import Mount
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('ipl_server.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -20,7 +28,8 @@ from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.browser.context import BrowserContext
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("browser_use")
+# Initialize MCP with proper name
+mcp = FastMCP("IPL Info Service")
 
 # Global variables
 browser: Optional[Browser] = None
@@ -72,7 +81,7 @@ def load_cache():
         if os.path.exists(CACHE_FILE):
             with open(CACHE_FILE, 'r') as f:
                 cache_data = json.load(f)
-                logger.debug(f"Successfully loaded cache from {CACHE_FILE}")
+                logger.info(f"Successfully loaded cache from {CACHE_FILE}")
                 return cache_data
         else:
             logger.info(f"Cache file not found, initializing new cache")
@@ -86,7 +95,7 @@ def save_cache(data):
     try:
         with open(CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2)
-        logger.debug(f"Successfully saved cache to {CACHE_FILE}")
+        logger.info(f"Successfully saved cache to {CACHE_FILE}")
         return True
     except Exception as e:
         logger.error(f"Error saving cache: {str(e)}")
@@ -95,7 +104,7 @@ def save_cache(data):
 def is_checked_recently(cache: Dict, data_type: str, minutes: int = 30) -> bool:
     """Check if data type was checked recently to avoid repeated browser initialization."""
     if not cache.get('lastChecked') or not cache['lastChecked'].get(data_type):
-        logger.debug(f"{data_type} has never been checked")
+        logger.info(f"{data_type} has never been checked")
         return False
     
     last_check_str = cache['lastChecked'][data_type]
@@ -104,9 +113,9 @@ def is_checked_recently(cache: Dict, data_type: str, minutes: int = 30) -> bool:
         time_since_last_check = datetime.now() - last_check
         recently_checked = time_since_last_check < timedelta(minutes=minutes)
         
-        logger.debug(f"{data_type} last checked at {last_check_str}")
-        logger.debug(f"Time since last check: {time_since_last_check}")
-        logger.debug(f"Recently checked: {recently_checked}")
+        logger.info(f"{data_type} last checked at {last_check_str}")
+        logger.info(f"Time since last check: {time_since_last_check}")
+        logger.info(f"Recently checked: {recently_checked}")
         
         return recently_checked
     except Exception as e:
@@ -116,7 +125,7 @@ def is_checked_recently(cache: Dict, data_type: str, minutes: int = 30) -> bool:
 def is_too_old(timestamp: str, days=0, minutes=0) -> bool:
     """Check if the timestamp is too old."""
     if not timestamp:
-        logger.debug("No timestamp provided, considering data as too old")
+        logger.info("No timestamp provided, considering data as too old")
         return True
     
     try:
@@ -124,10 +133,10 @@ def is_too_old(timestamp: str, days=0, minutes=0) -> bool:
         max_age = timedelta(days=days, minutes=minutes)
         too_old = datetime.now() - last_update > max_age
         
-        logger.debug(f"Last update: {last_update}")
-        logger.debug(f"Current time: {datetime.now()}")
-        logger.debug(f"Max age: {max_age}")
-        logger.debug(f"Data is too old: {too_old}")
+        logger.info(f"Last update: {last_update}")
+        logger.info(f"Current time: {datetime.now()}")
+        logger.info(f"Max age: {max_age}")
+        logger.info(f"Data is too old: {too_old}")
         
         return too_old
     except Exception as e:
@@ -137,7 +146,7 @@ def is_too_old(timestamp: str, days=0, minutes=0) -> bool:
 def is_updated_today(timestamp: str) -> bool:
     """Check if the timestamp is from today."""
     if not timestamp:
-        logger.debug("No timestamp provided, data not updated today")
+        logger.info("No timestamp provided, data not updated today")
         return False
     
     try:
@@ -145,9 +154,9 @@ def is_updated_today(timestamp: str) -> bool:
         current_date = datetime.now().date()
         is_today = last_update.date() == current_date
         
-        logger.debug(f"Last update date: {last_update.date()}")
-        logger.debug(f"Current date: {current_date}")
-        logger.debug(f"Updated today: {is_today}")
+        logger.info(f"Last update date: {last_update.date()}")
+        logger.info(f"Current date: {current_date}")
+        logger.info(f"Updated today: {is_today}")
         
         return is_today
     except Exception as e:
@@ -163,7 +172,7 @@ def update_last_checked(data_type: str):
         
         cache['lastChecked'][data_type] = datetime.now().isoformat()
         save_cache(cache)
-        logger.debug(f"Updated last checked time for {data_type}")
+        logger.info(f"Updated last checked time for {data_type}")
     except Exception as e:
         logger.error(f"Error updating last checked timestamp: {str(e)}")
 
@@ -210,7 +219,7 @@ async def fetch_fresh_data(data_type: str) -> Dict:
     
     try:
         if not browser_context:
-            logger.debug("Initializing browser for fetch_fresh_data")
+            logger.info("Initializing browser for fetch_fresh_data")
             await initialize_browser(headless=True)
             browser_initialized_locally = True
             BROWSER_INITIALIZED_BY_FETCH = True
@@ -245,7 +254,7 @@ async def fetch_fresh_data(data_type: str) -> Dict:
     finally:
         # Only close the browser if we opened it in this function
         if browser_initialized_locally and BROWSER_INITIALIZED_BY_FETCH:
-            logger.debug("Closing browser that was initialized by fetch_fresh_data")
+            logger.info("Closing browser that was initialized by fetch_fresh_data")
             await close_browser()
             BROWSER_INITIALIZED_BY_FETCH = False
 
@@ -266,7 +275,7 @@ async def initialize_browser(headless: bool = False, task: str = "") -> str:
     global browser, browser_context
     
     if browser:
-        logger.debug("Browser already initialized, closing it first")
+        logger.info("Browser already initialized, closing it first")
         await close_browser()
     
     logger.info(f"Initializing browser for task: {task}")
@@ -317,7 +326,7 @@ async def click_element(index: int) -> str:
 @mcp.tool()
 async def wait(seconds: int = 3) -> str:
     """Wait for specified seconds."""
-    logger.debug(f"Waiting for {seconds} seconds")
+    logger.info(f"Waiting for {seconds} seconds")
     await asyncio.sleep(seconds)
     return f"Waited for {seconds} seconds"
 
@@ -328,7 +337,7 @@ async def inspect_page() -> str:
     Returns:
         str: A formatted string that lists all interactive elements (if any) along with the content.
     """
-    logger.debug("Inspecting page")
+    logger.info("Inspecting page")
     # Get the current state to inspect interactive elements
     state = await browser_context.get_state()
     prompt_message = AgentMessagePrompt(
@@ -343,10 +352,10 @@ async def scroll_down(amount: int = None) -> str:
     page = await browser_context.get_current_page()
     if amount:
         await page.evaluate(f"window.scrollBy(0, {amount})")
-        logger.debug(f"Scrolled down by {amount} pixels")
+        logger.info(f"Scrolled down by {amount} pixels")
     else:
         await page.evaluate("window.scrollBy(0, window.innerHeight)")
-        logger.debug("Scrolled down by one screen height")
+        logger.info("Scrolled down by one screen height")
     return "Scrolled down"
 
 @mcp.tool()
@@ -355,10 +364,10 @@ async def scroll_up(amount: int = None) -> str:
     page = await browser_context.get_current_page()
     if amount:
         await page.evaluate(f"window.scrollBy(0, -{amount})")
-        logger.debug(f"Scrolled up by {amount} pixels")
+        logger.info(f"Scrolled up by {amount} pixels")
     else:
         await page.evaluate("window.scrollBy(0, -window.innerHeight)")
-        logger.debug("Scrolled up by one screen height")
+        logger.info("Scrolled up by one screen height")
     return "Scrolled up"
 
 # IPL-specific functions
@@ -418,13 +427,13 @@ async def get_points_table() -> Dict[str, Any]:
         
         # If not checked recently, determine if we need fresh data
         if not cache.get('pointsTable'):
-            logger.debug("Need refresh: No pointsTable in cache")
+            logger.info("Need refresh: No pointsTable in cache")
             need_refresh = True
         elif not cache['pointsTable'].get('lastUpdated'):
-            logger.debug("Need refresh: No lastUpdated timestamp")
+            logger.info("Need refresh: No lastUpdated timestamp")
             need_refresh = True
         elif not is_updated_today(cache['pointsTable']['lastUpdated']):
-            logger.debug(f"Need refresh: Not updated today. Last update: {cache['pointsTable']['lastUpdated']}")
+            logger.info(f"Need refresh: Not updated today. Last update: {cache['pointsTable']['lastUpdated']}")
             need_refresh = True
         else:
             logger.info("Using cached points table data from today")
@@ -566,13 +575,13 @@ async def get_ipl_schedule() -> Dict[str, Any]:
         need_refresh = False
         
         if not cache.get('schedule'):
-            logger.debug("Need refresh: No schedule in cache")
+            logger.info("Need refresh: No schedule in cache")
             need_refresh = True
         elif not cache['schedule'].get('lastUpdated'):
-            logger.debug("Need refresh: No lastUpdated timestamp")
+            logger.info("Need refresh: No lastUpdated timestamp")
             need_refresh = True
         elif is_too_old(cache['schedule']['lastUpdated'], days=7):
-            logger.debug(f"Need refresh: Data is older than 7 days. Last update: {cache['schedule']['lastUpdated']}")
+            logger.info(f"Need refresh: Data is older than 7 days. Last update: {cache['schedule']['lastUpdated']}")
             need_refresh = True
         else:
             logger.info("Using cached schedule data (less than 7 days old)")
@@ -598,10 +607,78 @@ async def get_ipl_schedule() -> Dict[str, Any]:
         logger.error(f"Error getting schedule: {str(e)}")
         return {"status": "error", "message": str(e)}
 
-def main():
-    """Run the MCP server for IPL information."""
-    logger.info("Starting MCP server for IPL information")
-    mcp.run(transport="stdio")
+# Configure middleware with CORS
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+]
+
+# Create ASGI app with SSE endpoint and middleware
+app = Starlette(
+    debug=False,
+    routes=[
+        Mount('/', app=mcp.sse_app()),
+    ],
+    middleware=middleware
+)
+
+# Add startup event handler
+@app.on_event("startup")
+async def startup_event():
+    try:
+        logger.info("=== IPL Info Service Starting ===")
+        logger.info("Registering tools...")
+        
+        # Properly await the tool listing
+        tools = await mcp.list_tools()
+        tool_count = len(tools)
+        
+        logger.info(f"Successfully registered {tool_count} tools:")
+        for tool in tools:
+            logger.info(f"- {tool}")
+            
+        logger.info("Server configuration:")
+        logger.info(f"- CORS enabled: True")
+        logger.info(f"- Port: 8111")
+        logger.info("================================")
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise e
+
+# Add test tool to verify MCP functionality
+@mcp.tool()
+async def test_connection() -> Dict[str, Any]:
+    """Simple tool to test if MCP server is working."""
+    return {
+        "status": "success",
+        "message": "MCP server is operational",
+        "timestamp": datetime.now().isoformat()
+    }
+
+# Add shutdown event handler
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Shutting down IPL Info Service...")
+    if browser:
+        await close_browser()
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    logger.info("Starting IPL Info Service...")
+    logger.info("Server will be available at: http://localhost:8111/sse")
+    
+    # Configure uvicorn with proper settings for SSE
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8111,
+        log_level="info",
+        access_log=True,
+        timeout_keep_alive=300,  # Increase keep-alive timeout
+        loop="asyncio"
+    )
