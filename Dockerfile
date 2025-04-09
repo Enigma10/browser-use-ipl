@@ -42,7 +42,7 @@ RUN pip install --upgrade pip && \
 RUN playwright install-deps && playwright install
 
 # Expose the port that uvicorn will run on
-EXPOSE 8000
+EXPOSE 8111
 
 # Command to run using uv
 CMD ["uv", "run", "main.py"]

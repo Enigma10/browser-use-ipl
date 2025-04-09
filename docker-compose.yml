@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: mcp-server
     ports:
-      - "8000:8000"
+      - "8111:8111"
     volumes:
       - .:/app
       - /app/.venv
