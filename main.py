@@ -29,7 +29,7 @@ from browser_use.browser.context import BrowserContext
 from mcp.server.fastmcp import FastMCP
 
 # Initialize MCP with proper name
-mcp = FastMCP("IPL Info Service")
+mcp = FastMCP("ipl_mcp")
 
 # Global variables
 browser: Optional[Browser] = None

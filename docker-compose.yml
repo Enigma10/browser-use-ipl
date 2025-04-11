@@ -12,7 +12,7 @@ services:
       - .:/app
       - /app/.venv
     networks:
-      - backend
+      - backend # This specifies that the container joins the 'backend' network
     restart: unless-stopped
 
 volumes:
@@ -20,4 +20,9 @@ volumes:
 
 networks:
   backend:
-    driver: bridge
+    driver:
+      bridge # This creates a network named 'backend' using the bridge driver
+      # The bridge driver is the default network driver in Docker
+      # It creates an isolated network on the host where containers can communicate
+      # with each other but are isolated from the host network by default
+      # This is useful for container-to-container communication while maintaining security
