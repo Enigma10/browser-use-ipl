@@ -594,10 +594,12 @@ async def get_stats() -> Dict[str, Any]:
     Returns:
     Batting Stats:
     - Most Runs
+    - Top 10 or 15 players with most runs
 
     
     Bowling Stats:
     - Most Wickets
+    - Top 10 or 15 players with most wickets 
     """
     try:
         logger.info("Getting IPL statistics")
