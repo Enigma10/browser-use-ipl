@@ -270,7 +270,7 @@ def update_cache(data_type: str, new_data: Dict):
 
 # Essential browser functions for IPL
 @mcp.tool()
-async def initialize_browser(headless: bool = False, task: str = "") -> str:
+async def initialize_browser(headless: bool = True, task: str = "") -> str:
     """Initialize browser for IPL operations."""
     global browser, browser_context
     
@@ -377,7 +377,7 @@ async def get_current_matches() -> Dict[str, Any]:
     try:
         logger.info("Getting current IPL matches")
         if not browser_context:
-            await initialize_browser(headless=False, task="Get IPL Matches")
+            await initialize_browser(headless=True, task="Get IPL Matches")
         
         await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/matches")
         await wait(2)
@@ -394,7 +394,7 @@ async def get_match_details(match_id: str) -> Dict[str, Any]:
     try:
         logger.info(f"Getting details for match ID: {match_id}")
         if not browser_context:
-            await initialize_browser(headless=False, task="Get Match Details")
+            await initialize_browser(headless=True, task="Get Match Details")
         
         await go_to_url(f"https://www.cricbuzz.com/live-cricket-scores/{match_id}")
         await wait(2)
@@ -465,7 +465,7 @@ async def get_stats() -> Dict[str, Any]:
     try:
         logger.info("Getting IPL statistics")
         if not browser_context:
-            await initialize_browser(headless=False, task="Get IPL Stats")
+            await initialize_browser(headless=True, task="Get IPL Stats")
         
         await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/stats")
         await wait(2)
