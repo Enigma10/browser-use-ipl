@@ -320,66 +320,58 @@ async def fetch_fresh_data(data_type: str) -> Dict:
             }
             
         elif data_type == 'stats':
-            await page.goto("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/stats")
+            # Fetch most runs
+            await page.goto("https://www.cricbuzz.com/api/html/series/9237/most-runs/0/0/IPL")
             await page.wait_for_load_state('networkidle')
-            
-            # JavaScript to extract batting and bowling stats
-            stats_data = await page.evaluate("""() => {
-                // Get batting stats
-                const battingRows = Array.from(document.querySelectorAll('.cb-col.cb-col-100.cb-ltst-wgt-hdr'))
-                    .filter(row => row.querySelector('.cb-col.cb-col-100.cb-scrd-itms'));
-                
-                const battingStats = battingRows.map(row => {
-                    const columns = row.querySelectorAll('.cb-col.cb-col-100.cb-scrd-itms span');
-                    return {
-                        player: columns[0].innerText.trim(),
-                        matches: parseInt(columns[1].innerText) || 0,
-                        innings: parseInt(columns[2].innerText) || 0,
-                        runs: parseInt(columns[3].innerText) || 0,
-                        average: parseFloat(columns[4].innerText) || 0,
-                        strikeRate: parseFloat(columns[5].innerText) || 0,
-                        fours: parseInt(columns[6].innerText) || 0,
-                        sixes: parseInt(columns[7].innerText) || 0
-                    };
+            most_runs = await page.evaluate("""() => {
+                const table = document.querySelector('.cb-series-stats');
+                const headers = Array.from(table.querySelectorAll('thead th'))
+                    .map(th => th.innerText.trim())
+                    .filter(Boolean);
+                const rows = Array.from(table.querySelectorAll('tbody tr'));
+                return rows.map(row => {
+                    const cells = Array.from(row.querySelectorAll('td'));
+                    const data = {};
+                    headers.forEach((key, i) => {
+                        data[key] = cells[i]?.innerText.trim() || null;
+                    });
+                    return data;
                 });
-                
-                // Get bowling stats
-                const bowlingRows = Array.from(document.querySelectorAll('.cb-col.cb-col-100.cb-ltst-wgt-hdr'))
-                    .filter(row => row.querySelector('.cb-col.cb-col-100.cb-scrd-itms'));
-                
-                const bowlingStats = bowlingRows.map(row => {
-                    const columns = row.querySelectorAll('.cb-col.cb-col-100.cb-scrd-itms span');
-                    return {
-                        player: columns[0].innerText.trim(),
-                        matches: parseInt(columns[1].innerText) || 0,
-                        innings: parseInt(columns[2].innerText) || 0,
-                        wickets: parseInt(columns[3].innerText) || 0,
-                        average: parseFloat(columns[4].innerText) || 0,
-                        economy: parseFloat(columns[5].innerText) || 0,
-                        strikeRate: parseFloat(columns[6].innerText) || 0,
-                        bestBowling: columns[7].innerText.trim()
-                    };
-                });
-                
-                return {
-                    batting: battingStats,
-                    bowling: bowlingStats
-                };
             }""")
-            
-            logger.info(f"Stats data extracted: {len(stats_data['batting'])} batting records, {len(stats_data['bowling'])} bowling records")
-            
-            if not stats_data:
-                raise Exception("Failed to get stats data")
-                
-            return {
+
+            # Fetch most wickets
+            await page.goto("https://www.cricbuzz.com/api/html/series/9237/most-wickets/0/0/IPL")
+            await page.wait_for_load_state('networkidle')
+            most_wickets = await page.evaluate("""() => {
+                const table = document.querySelector('.cb-series-stats');
+                const headers = Array.from(table.querySelectorAll('thead th'))
+                    .map(th => th.innerText.trim())
+                    .filter(Boolean);
+                const rows = Array.from(table.querySelectorAll('tbody tr'));
+                return rows.map(row => {
+                    const cells = Array.from(row.querySelectorAll('td'));
+                    const data = {};
+                    headers.forEach((key, i) => {
+                        data[key] = cells[i]?.innerText.trim() || null;
+                    });
+                    return data;
+                });
+            }""")
+
+            stats_data = {
                 'lastUpdated': datetime.now().isoformat(),
                 'stats': {
-                    'content': stats_data,
+                    'content': {
+                        'batting': most_runs,  # Direct array of batting stats
+                        'bowling': most_wickets  # Direct array of bowling stats
+                    },
                     'content_type': 'json',
                     'parsed': True
                 }
             }
+            
+            logger.info(f"Stats data extracted: {len(most_runs)} batting records, {len(most_wickets)} bowling records")
+            return stats_data
             
         else:
             raise ValueError(f"Unknown data type: {data_type}")
@@ -601,20 +593,11 @@ async def get_stats() -> Dict[str, Any]:
     
     Returns:
     Batting Stats:
-    - Runs scored
-    - Batting average
-    - Strike rate
-    - Boundaries (4s and 6s)
-    - High score
-    - Not outs
+    - Most Runs
+
     
     Bowling Stats:
-    - Wickets taken
-    - Economy rate
-    - Average
-    - Strike rate
-    - Best bowling figures
-    - Maidens
+    - Most Wickets
     """
     try:
         logger.info("Getting IPL statistics")
@@ -870,3 +853,20 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # Increase keep-alive timeout
         loop="asyncio"
     )
+    
+    
+#     https://www.cricbuzz.com/api/html/series/9237/most-runs/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/highest-score/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/highest-avg/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/highest-sr/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-hundreds/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-fifties/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-fours/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-sixes/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-nineties/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-wickets/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/lowest-avg/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/best-bowling-innings/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/most-five-wickets/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/lowest-econ/0/0/IPL
+# https://www.cricbuzz.com/api/html/series/9237/lowest-sr/0/0/IPL
