@@ -59,9 +59,17 @@ def initialize_cache():
             'lastUpdated': None,
             'teams': []
         },
+        'stats': {
+            'lastUpdated': None,
+            'stats': {
+                'batting': [],
+                'bowling': []
+            }
+        },
         'lastChecked': {
             'schedule': None,
-            'pointsTable': None
+            'pointsTable': None,
+            'stats': None
         }
     }
     
@@ -274,16 +282,105 @@ async def fetch_fresh_data(data_type: str) -> Dict:
             }
         
         elif data_type == 'pointsTable':
-            await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/points-table")
-            await wait(2)
-            content = await inspect_page()
+            await page.goto("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/points-table")
+            await page.wait_for_load_state('networkidle')
             
-            if not content:
-                raise Exception("Failed to get points table content")
+            # JavaScript to extract points table data
+            points_data = await page.evaluate("""() => {
+                const rows = Array.from(document.querySelectorAll('.cb-srs-pnts > tbody > tr'))
+                    .filter(row => row.querySelector('td.cb-srs-pnts-name'));
+
+                return rows.map(row => {
+                    const columns = row.querySelectorAll('td');
+                    const teamName = columns[0].innerText.trim();
+                    const mat = parseInt(columns[1].innerText);
+                    const won = parseInt(columns[2].innerText);
+                    const lost = parseInt(columns[3].innerText);
+                    const tied = parseInt(columns[4].innerText);
+                    const nr = parseInt(columns[5].innerText);
+                    const pts = parseInt(columns[6].innerText);
+                    const nrr = columns[7].innerText.trim();
+
+                    return { teamName, mat, won, lost, tied, nr, pts, nrr };
+                });
+            }""")
+            
+            logger.info(f"Points table data extracted: {points_data}: {len(points_data)} teams found")
+            
+            if not points_data:
+                raise Exception("Failed to get points table data")
+                
             return {
                 'lastUpdated': datetime.now().isoformat(),
-                'teams': parse_points_table(content),
+                'teams': {
+                    'content': points_data,
+                    'content_type': 'json',
+                    'parsed': True
+                }
             }
+            
+        elif data_type == 'stats':
+            await page.goto("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/stats")
+            await page.wait_for_load_state('networkidle')
+            
+            # JavaScript to extract batting and bowling stats
+            stats_data = await page.evaluate("""() => {
+                // Get batting stats
+                const battingRows = Array.from(document.querySelectorAll('.cb-col.cb-col-100.cb-ltst-wgt-hdr'))
+                    .filter(row => row.querySelector('.cb-col.cb-col-100.cb-scrd-itms'));
+                
+                const battingStats = battingRows.map(row => {
+                    const columns = row.querySelectorAll('.cb-col.cb-col-100.cb-scrd-itms span');
+                    return {
+                        player: columns[0].innerText.trim(),
+                        matches: parseInt(columns[1].innerText) || 0,
+                        innings: parseInt(columns[2].innerText) || 0,
+                        runs: parseInt(columns[3].innerText) || 0,
+                        average: parseFloat(columns[4].innerText) || 0,
+                        strikeRate: parseFloat(columns[5].innerText) || 0,
+                        fours: parseInt(columns[6].innerText) || 0,
+                        sixes: parseInt(columns[7].innerText) || 0
+                    };
+                });
+                
+                // Get bowling stats
+                const bowlingRows = Array.from(document.querySelectorAll('.cb-col.cb-col-100.cb-ltst-wgt-hdr'))
+                    .filter(row => row.querySelector('.cb-col.cb-col-100.cb-scrd-itms'));
+                
+                const bowlingStats = bowlingRows.map(row => {
+                    const columns = row.querySelectorAll('.cb-col.cb-col-100.cb-scrd-itms span');
+                    return {
+                        player: columns[0].innerText.trim(),
+                        matches: parseInt(columns[1].innerText) || 0,
+                        innings: parseInt(columns[2].innerText) || 0,
+                        wickets: parseInt(columns[3].innerText) || 0,
+                        average: parseFloat(columns[4].innerText) || 0,
+                        economy: parseFloat(columns[5].innerText) || 0,
+                        strikeRate: parseFloat(columns[6].innerText) || 0,
+                        bestBowling: columns[7].innerText.trim()
+                    };
+                });
+                
+                return {
+                    batting: battingStats,
+                    bowling: bowlingStats
+                };
+            }""")
+            
+            logger.info(f"Stats data extracted: {len(stats_data['batting'])} batting records, {len(stats_data['bowling'])} bowling records")
+            
+            if not stats_data:
+                raise Exception("Failed to get stats data")
+                
+            return {
+                'lastUpdated': datetime.now().isoformat(),
+                'stats': {
+                    'content': stats_data,
+                    'content_type': 'json',
+                    'parsed': True
+                }
+            }
+            
         else:
             raise ValueError(f"Unknown data type: {data_type}")
 
@@ -445,7 +542,15 @@ async def get_match_details(match_id: str) -> Dict[str, Any]:
 
 @mcp.tool()
 async def get_points_table() -> Dict[str, Any]:
-    """Get current IPL points table."""
+    """Get current IPL points table standings.
+    
+    Returns:
+    - Matches played by each team (mat)
+    - Wins/losses/ties/no results (won/lost/tied/nr)
+    - Points accumulated (pts)
+    - Net Run Rate (nrr)
+    - Team rankings and qualification status
+    """
     try:
         logger.info("Getting IPL points table")
         
@@ -453,44 +558,37 @@ async def get_points_table() -> Dict[str, Any]:
         cache = load_cache()
         update_last_checked('pointsTable')
         
-        # Decide whether to use cache or fetch fresh data
-        need_refresh = False
-        
-        # Check if we've already checked recently (to avoid unnecessary browser init)
+        # Check if we've already checked recently
         recently_checked = is_checked_recently(cache, 'pointsTable', minutes=30)
         
         if recently_checked:
             logger.info("Points table checked recently, using cached data")
             return {"status": "success", "points_table": cache['pointsTable']['teams']}
         
-        # If not checked recently, determine if we need fresh data
+        # Determine if we need fresh data
+        need_refresh = False
         if not cache.get('pointsTable'):
+            need_refresh = True
             logger.info("Need refresh: No pointsTable in cache")
-            need_refresh = True
         elif not cache['pointsTable'].get('lastUpdated'):
+            need_refresh = True
             logger.info("Need refresh: No lastUpdated timestamp")
-            need_refresh = True
         elif not is_updated_today(cache['pointsTable']['lastUpdated']):
-            logger.info(f"Need refresh: Not updated today. Last update: {cache['pointsTable']['lastUpdated']}")
             need_refresh = True
+            logger.info(f"Need refresh: Not updated today. Last update: {cache['pointsTable']['lastUpdated']}")
         else:
             logger.info("Using cached points table data from today")
         
         if need_refresh:
-            # Get fresh data
-            logger.info("Fetching fresh points table data")
             points_data = await fetch_fresh_data('pointsTable')
             if points_data:
                 update_cache('pointsTable', points_data)
                 return {"status": "success", "points_table": points_data['teams']}
-            else:
-                # If fetch fails, use whatever we have in cache
-                if cache.get('pointsTable') and cache['pointsTable'].get('teams'):
-                    logger.warning("Fetch failed, using cached data despite being old")
-                    return {"status": "success", "points_table": cache['pointsTable']['teams']}
-                return {"status": "error", "message": "Failed to fetch points table and no cache available"}
+            elif cache.get('pointsTable') and cache['pointsTable'].get('teams'):
+                logger.warning("Fetch failed, using cached data despite being old")
+                return {"status": "success", "points_table": cache['pointsTable']['teams']}
+            return {"status": "error", "message": "Failed to fetch points table and no cache available"}
         else:
-            # Return cached data
             return {"status": "success", "points_table": cache['pointsTable']['teams']}
             
     except Exception as e:
@@ -499,26 +597,62 @@ async def get_points_table() -> Dict[str, Any]:
 
 @mcp.tool()
 async def get_stats() -> Dict[str, Any]:
-    """Get IPL statistics (batting and bowling)."""
+    """Get IPL statistics for batting and bowling.
+    
+    Returns:
+    Batting Stats:
+    - Runs scored
+    - Batting average
+    - Strike rate
+    - Boundaries (4s and 6s)
+    - High score
+    - Not outs
+    
+    Bowling Stats:
+    - Wickets taken
+    - Economy rate
+    - Average
+    - Strike rate
+    - Best bowling figures
+    - Maidens
+    """
     try:
         logger.info("Getting IPL statistics")
-        if not browser_context:
-            await initialize_browser(headless=True, task="Get IPL Stats")
         
-        await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/stats")
-        await wait(2)
+        cache = load_cache()
+        update_last_checked('stats')
         
-        stats_content = await inspect_page()
+        recently_checked = is_checked_recently(cache, 'stats', minutes=30)
         
-        try:
-            await click_element(37)  # Bowling stats tab
-            await wait(1)
-            bowling_stats = await inspect_page()
-            stats_content += "\n\nBowling Stats:\n" + bowling_stats
-        except Exception as e:
-            logger.warning(f"Could not load bowling stats: {str(e)}")
+        if recently_checked and cache.get('stats') and cache['stats'].get('stats'):
+            logger.info("Stats checked recently, using cached data")
+            return {"status": "success", "stats": cache['stats']['stats']}
         
-        return {"status": "success", "stats": stats_content}
+        need_refresh = False
+        if not cache.get('stats'):
+            need_refresh = True
+            logger.info("Need refresh: No stats in cache")
+        elif not cache['stats'].get('lastUpdated'):
+            need_refresh = True
+            logger.info("Need refresh: No lastUpdated timestamp")
+        elif not is_updated_today(cache['stats']['lastUpdated']):
+            need_refresh = True
+            logger.info(f"Need refresh: Not updated today. Last update: {cache['stats']['lastUpdated']}")
+        else:
+            logger.info("Using cached stats data from today")
+        
+        if need_refresh:
+            stats_data = await fetch_fresh_data('stats')
+            if stats_data:
+                update_cache('stats', stats_data)
+                return {"status": "success", "stats": stats_data['stats']}
+            elif cache.get('stats') and cache['stats'].get('stats'):
+                logger.warning("Fetch failed, using cached data despite being old")
+                return {"status": "success", "stats": cache['stats']['stats']}
+            return {"status": "error", "message": "Failed to fetch stats and no cache available"}
+        else:
+            return {"status": "success", "stats": cache['stats']['stats']}
+            
     except Exception as e:
         logger.error(f"Error getting stats: {str(e)}")
         return {"status": "error", "message": str(e)}
@@ -594,51 +728,56 @@ def filter_team_matches(matches_data: Dict, team_name: str) -> Dict[str, Any]:
 
 @mcp.tool()
 async def get_ipl_schedule() -> Dict[str, Any]:
-    """Get full IPL schedule."""
+    """Get complete IPL schedule with detailed match information.
+    Returns for each match:
+    - Match date and time
+    - Teams playing
+    - Venue details
+    - Match result or status
+    - Match type (league/playoff)
+    
+    Features:
+    - Filter matches by team
+    - Get upcoming matches
+    - Check today's matches
+    - View match results
+    - Track playoff matches
+    """
     try:
         logger.info("Getting IPL schedule")
         
-        # First check cache
         cache = load_cache()
         update_last_checked('schedule')
         
-        # Check if we've already checked recently (to avoid unnecessary browser init)
         recently_checked = is_checked_recently(cache, 'schedule', minutes=30)
         
         if recently_checked:
             logger.info("Schedule checked recently, using cached data")
             return {"status": "success", "schedule": cache['schedule']['matches']}
         
-        # Decide whether to use cache or fetch fresh data
         need_refresh = False
-        
         if not cache.get('schedule'):
+            need_refresh = True
             logger.info("Need refresh: No schedule in cache")
-            need_refresh = True
         elif not cache['schedule'].get('lastUpdated'):
+            need_refresh = True
             logger.info("Need refresh: No lastUpdated timestamp")
-            need_refresh = True
         elif is_too_old(cache['schedule']['lastUpdated'], days=7):
-            logger.info(f"Need refresh: Data is older than 7 days. Last update: {cache['schedule']['lastUpdated']}")
             need_refresh = True
+            logger.info(f"Need refresh: Data is older than 7 days. Last update: {cache['schedule']['lastUpdated']}")
         else:
             logger.info("Using cached schedule data (less than 7 days old)")
         
         if need_refresh:
-            # Get fresh data
-            logger.info("Fetching fresh schedule data")
             schedule_data = await fetch_fresh_data('schedule')
             if schedule_data:
                 update_cache('schedule', schedule_data)
                 return {"status": "success", "schedule": schedule_data['matches']}
-            else:
-                # If fetch fails, use whatever we have in cache
-                if cache.get('schedule') and cache['schedule'].get('matches'):
-                    logger.warning("Fetch failed, using cached data despite being old")
-                    return {"status": "success", "schedule": cache['schedule']['matches']}
-                return {"status": "error", "message": "Failed to fetch schedule and no cache available"}
+            elif cache.get('schedule') and cache['schedule'].get('matches'):
+                logger.warning("Fetch failed, using cached data despite being old")
+                return {"status": "success", "schedule": cache['schedule']['matches']}
+            return {"status": "error", "message": "Failed to fetch schedule and no cache available"}
         else:
-            # Return cached data
             return {"status": "success", "schedule": cache['schedule']['matches']}
             
     except Exception as e:
@@ -691,11 +830,22 @@ async def startup_event():
 # Add test tool to verify MCP functionality
 @mcp.tool()
 async def test_connection() -> Dict[str, Any]:
-    """Simple tool to test if MCP server is working."""
+    """Simple tool to test if MCP server is working.
+    
+    Returns:
+    - Connection status
+    - Server timestamp
+    - Basic server info
+    """
     return {
         "status": "success",
         "message": "MCP server is operational",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "server_info": {
+            "name": "ipl_mcp",
+            "version": "1.0.0",
+            "cache_enabled": True
+        }
     }
 
 # Add shutdown event handler
