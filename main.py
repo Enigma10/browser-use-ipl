@@ -198,6 +198,7 @@ def parse_points_table(content: str) -> dict:
     # For now returning raw content, we'll implement parsing later
     return {
         "content": content,
+        "content_type": "HTML",
         "parsed": False  # Indicator that we need to implement parsing
     }
 
@@ -207,7 +208,8 @@ def parse_schedule(content: str) -> dict:
     # For now returning raw content, we'll implement parsing later
     return {
         "content": content,
-        "parsed": False  # Indicator that we need to implement parsing
+        "content_type": "HTML",
+        "parsed": False   # Indicator that we need to implement parsing
     }
 
 async def fetch_fresh_data(data_type: str) -> Dict:
@@ -220,30 +222,67 @@ async def fetch_fresh_data(data_type: str) -> Dict:
     try:
         if not browser_context:
             logger.info("Initializing browser for fetch_fresh_data")
-            await initialize_browser(headless=True)
+            await initialize_browser(headless=True, task=f"Fetch {data_type} complete data")
             browser_initialized_locally = True
             BROWSER_INITIALIZED_BY_FETCH = True
 
+        # Get the page object from browser context
+        page = await browser_context.get_current_page()
+        logger.info(f"Page: {page}")
+        if not page:
+            raise Exception("Failed to get page from browser context")
+
         if data_type == 'schedule':
-            await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/matches")
-            await wait(2)
-            content = await inspect_page()
-            if not content:
-                raise Exception("Failed to get schedule content")
+            await page.goto("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/matches")
+            await page.wait_for_load_state('networkidle')
+            
+            # JavaScript to extract match data
+            schedule_data = await page.evaluate("""() => {
+                const divs = Array.from(document.getElementsByClassName("cb-series-matches"));
+                return divs.map(div => {
+                    const date = div.querySelector(':nth-child(2)').innerText;
+                    const meta = div.querySelector('div:nth-child(3)');
+                    const details = meta.querySelector('div');
+                    
+                    const title = details.querySelector(':nth-child(1)').innerText;
+                    const venue = details.querySelector(':nth-child(2)').innerText;
+                    const result = details.querySelector(':nth-child(3)').innerText;
+                    const time = meta.querySelector('div:nth-of-type(2) > span').innerText + ' IST';
+                    
+                    return {
+                        date: date,
+                        title: title,
+                        venue: venue,
+                        result: result,
+                        time: time
+                    };
+                });
+            }""")
+            
+            logger.info(f"Schedule data extracted: {schedule_data}: {len(schedule_data)} matches found")
+            
+            if not schedule_data:
+                raise Exception("Failed to get schedule data")
+                
             return {
                 'lastUpdated': datetime.now().isoformat(),
-                'matches': parse_schedule(content)
+                'matches': {
+                    'content': schedule_data,
+                    'content_type': 'json',
+                    'parsed': True
+                }
             }
         
         elif data_type == 'pointsTable':
             await go_to_url("https://www.cricbuzz.com/cricket-series/9237/indian-premier-league-2025/points-table")
             await wait(2)
             content = await inspect_page()
+            
             if not content:
                 raise Exception("Failed to get points table content")
             return {
                 'lastUpdated': datetime.now().isoformat(),
-                'teams': parse_points_table(content)
+                'teams': parse_points_table(content),
             }
         else:
             raise ValueError(f"Unknown data type: {data_type}")
@@ -269,7 +308,7 @@ def update_cache(data_type: str, new_data: Dict):
         logger.error(f"Error updating cache for {data_type}: {str(e)}")
 
 # Essential browser functions for IPL
-@mcp.tool()
+# @mcp.tool()
 async def initialize_browser(headless: bool = True, task: str = "") -> str:
     """Initialize browser for IPL operations."""
     global browser, browser_context
@@ -285,7 +324,7 @@ async def initialize_browser(headless: bool = True, task: str = "") -> str:
     
     return f"Browser initialized for task: {task}"
 
-@mcp.tool()
+# @mcp.tool()
 async def close_browser() -> str:
     """Close the browser instance."""
     global browser, browser_context, BROWSER_INITIALIZED_BY_FETCH
@@ -303,7 +342,7 @@ async def close_browser() -> str:
     BROWSER_INITIALIZED_BY_FETCH = False
     return "Browser closed successfully"
 
-@mcp.tool()
+
 async def go_to_url(url: str) -> str:
     """Navigate to a specific URL."""
     logger.info(f"Navigating to {url}")
@@ -312,7 +351,7 @@ async def go_to_url(url: str) -> str:
     await page.wait_for_load_state()
     return f"Navigated to {url}"
 
-@mcp.tool()
+
 async def click_element(index: int) -> str:
     """Click an element on the page."""
     if index not in await browser_context.get_selector_map():
@@ -323,14 +362,13 @@ async def click_element(index: int) -> str:
     logger.info(f"Clicked element at index {index}")
     return f"Clicked element at index {index}"
 
-@mcp.tool()
+
 async def wait(seconds: int = 3) -> str:
     """Wait for specified seconds."""
     logger.info(f"Waiting for {seconds} seconds")
     await asyncio.sleep(seconds)
     return f"Waited for {seconds} seconds"
 
-@mcp.tool()
 async def inspect_page() -> str:
     """
     Lists interactive elements and extracts content from the current page.
@@ -346,7 +384,7 @@ async def inspect_page() -> str:
     ).get_user_message(use_vision=False)
     return prompt_message.content
 
-@mcp.tool()
+
 async def scroll_down(amount: int = None) -> str:
     """Scroll down the page."""
     page = await browser_context.get_current_page()
@@ -358,7 +396,7 @@ async def scroll_down(amount: int = None) -> str:
         logger.info("Scrolled down by one screen height")
     return "Scrolled down"
 
-@mcp.tool()
+
 async def scroll_up(amount: int = None) -> str:
     """Scroll up the page."""
     page = await browser_context.get_current_page()
@@ -371,7 +409,7 @@ async def scroll_up(amount: int = None) -> str:
     return "Scrolled up"
 
 # IPL-specific functions
-@mcp.tool()
+# @mcp.tool()
 async def get_current_matches() -> Dict[str, Any]:
     """Get list of all current IPL matches."""
     try:
@@ -388,7 +426,7 @@ async def get_current_matches() -> Dict[str, Any]:
         logger.error(f"Error getting matches: {str(e)}")
         return {"status": "error", "message": str(e)}
 
-@mcp.tool()
+# @mcp.tool()
 async def get_match_details(match_id: str) -> Dict[str, Any]:
     """Get detailed information about a specific IPL match."""
     try:
@@ -485,7 +523,7 @@ async def get_stats() -> Dict[str, Any]:
         logger.error(f"Error getting stats: {str(e)}")
         return {"status": "error", "message": str(e)}
 
-@mcp.tool()
+# @mcp.tool()
 async def get_team_schedule(team_name: str) -> Dict[str, Any]:
     """Get schedule for a specific IPL team."""
     try:
