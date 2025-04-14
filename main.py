@@ -38,6 +38,10 @@ message_manager: Optional[MessageManager] = None
 CACHE_FILE = os.path.join(os.path.dirname(__file__), 'ipl_cache.json')
 BROWSER_INITIALIZED_BY_FETCH = False  # Track if browser was initialized by fetch_fresh_data
 
+# Cache configuration
+CACHE_DURATION = timedelta(hours=1)  # Unified cache duration for all data types
+ERROR_CACHE_DURATION = timedelta(hours=1)  # Same cache duration for error states
+
 # Cache management functions
 def initialize_cache():
     """Initialize the cache file if it doesn't exist."""
@@ -130,15 +134,20 @@ def is_checked_recently(cache: Dict, data_type: str, minutes: int = 30) -> bool:
         logger.error(f"Error checking last check time: {str(e)}")
         return False
 
-def is_too_old(timestamp: str, days=0, minutes=0) -> bool:
-    """Check if the timestamp is too old."""
+def is_too_old(timestamp: str, is_error: bool = False) -> bool:
+    """Check if the timestamp is too old based on cache duration.
+    
+    Args:
+        timestamp: The timestamp to check
+        is_error: Whether this is an error state (uses same cache duration)
+    """
     if not timestamp:
         logger.info("No timestamp provided, considering data as too old")
         return True
     
     try:
         last_update = datetime.fromisoformat(timestamp)
-        max_age = timedelta(days=days, minutes=minutes)
+        max_age = CACHE_DURATION  # Use same duration for both normal and error states
         too_old = datetime.now() - last_update > max_age
         
         logger.info(f"Last update: {last_update}")
